@@ -108,31 +108,60 @@ if not out_send.isOpened():
     print("out send not opened")
     exit(0)
 #--------------------------------------------------------------------------------------
+#poseBuffer = np.zeros((4, 10, 50))
+_handsPoints = [4]
+poseBuffer = [(...,4)]
+inshotCount = 0
 def calcRaiseHands(_poses):
     lastScore = 0
     bump = 0
     for pose in _poses:
         if pose.score < 0.1: continue
-        for label, keypoint in pose.keypoints.items():
-            pass
-            #if(label.name == "LEFT_ELBOW"):
-            #    _lElbow = keypoint
-            #if(label.name == "RIGHT_ELBOW"):
-            #    _rElbow = keypoint
-            #if(label.name == "LEFT_WRIST"):
-            #    _lWrist = keypoint
-            #if(label.name == "RIGHT_WRIST"):
-            #    _rWrist = keypoint
+        if(pose.score > lastScore):
+            lastScore = pose.score
+            for label, keypoint in pose.keypoints.items():
+                if(label.name == "LEFT_ELBOW"):
+                    _handsPoints = keypoint[0].x
+                elif(label.name == "RIGHT_ELBOW"):
+                    _handsPoints = keypoint[0].y
+                elif(label.name == "LEFT_WRIST"):
+                    _handsPoints = keypoint[0].x
+                elif(label.name == "RIGHT_WRIST"):
+                    _handsPoints = keypoint[0].y
+        
+            poseBuffer.append(_handsPoints)
+            if(len(poseBuffer) > 50):
+                poseBuffer.pop()
+    
+    if(not len(_poses)):
+        poseBuffer.clear()
+    
+    for n in poseBuffer:
+        print(n)
+
+            
+
+
+#        poseBuffer.append(_handsPoints)
+#        if(poseBuffer.len > 50):
+#            poseBuffer.pop()
+#    
+#    posesBuffer.append(poseBuffer)
+#    if(posesBuffer.len > 50):
+#        posesBuffer.pop()
+#    
+            
             #try:
             #    if((_lWrist[0].y < _lElbow[0].y) & (_rWrist[0].y < _rElbow[0].y)):
             #        #print(_lWrist[0].y)
             #        bump += 1
-            #except:
-            #    pass
-    lastScore = pose.score
-    if(bump > 3):
-        print("BONGO")
-        bump = 0
+            #except: pass
+        
+        
+#    lastScore = pose.score
+#    if(bump > 3):
+#        print("BONGO")
+#        bump = 0
 #--------------------------------------------------------------------------------------_
 def drawDebug(_frame2, _poses):
     for pose in _poses:
@@ -141,7 +170,7 @@ def drawDebug(_frame2, _poses):
         for label, keypoint in pose.keypoints.items():
             cv2.circle(_frame2, (int(keypoint.point[0]/engine._input_width*_frame2.shape[1]), int(keypoint.point[1]/engine._input_height*_frame2.shape[0])), 2, [0, 255, 0])
             print(label.name, keypoint.point[0], keypoint.point[1], keypoint.score)
-            
+
     cv2.imshow("", _frame2)
 #--------------------------------------------------------------------------------------_
 def opticalFlow():
@@ -175,6 +204,7 @@ def opticalFlow():
             out_send.write(rgb)
 
             drawDebug(frame2, poses)
+            calcRaiseHands(poses)
             
             k = cv2.waitKey(10) & 0xff
             if k == 27:  # EXIT
