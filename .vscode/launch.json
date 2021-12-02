@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "sudo" : true,
+            "sudo" : false,
             "args": ["5014", "192", "108", "30", "192", "108", "3", "3", "172.17.0.1", "5011"]
         }
     ]

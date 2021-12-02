@@ -27,6 +27,7 @@ import numpy as np
 from pose_engine import Keypoint, KeypointType, PoseEngine
 import time
 import threading
+import socket
 
 
 class ThreadedCap:
@@ -45,6 +46,8 @@ class ThreadedCap:
             if (frame.size > 0):
                 self.ret = ret
                 self.frame = frame
+            else:
+                print("Frame empty")
 
     def read(self):
         return self.ret, self.frame
@@ -72,18 +75,12 @@ try:
         print("arguments parsed")
     else:
         print("not enough arguments")
-        # python DHSCam.py 5014 192 108 30 192 108 3 3 127.0.0.1 5011
-        # exit(0)
-    # cap = cv2.VideoCapture("nvarguscamerasrc sensor_id=0 ! video/x-raw(memory:NVMM), width=192, height=108 ! nvvidconv ! video/x-raw, width=192, height=108, framerate=30/1 ! videoconvert ! video/x-raw, format=BGR, width=192, height=108, framerate=30/1 ! appsink", cv2.CAP_GSTREAMER) #CSI CAMERA ON JETSON
-    # cap = cv2.VideoCapture("v4l2src device=/dev/video1 ! videoconvert ! videoscale ! queue ! video/x-raw,framerate=30/1,width=192,height=108,format=RGB,stream-format=RGB-stream ! deinterlace ! videoconvert ! video/x-raw, format=(string)BGR ! appsink", cv2.CAP_GSTREAMER) #USB CAMERA ON JETSON
-    # cap = cv2.VideoCapture("udpsrc port=5014 ! application/x-rtp, encoding-name=(string)RAW, sampling=(string)RGB, depth=(string)8, width=(string)192, height=(string)108,framerate=30/1 ! rtpvrawdepay ! queue ! videoconvert ! video/x-raw, format=BGR, width=192, height=108 ! appsink", cv2.CAP_GSTREAMER) #UDP CAMERA ON JETSON
     print("TryingCap")
     cap = ThreadedCap(("udpsrc port="+str(portIn)+" ! application/x-rtp, encoding-name=(string)RAW, sampling=(string)RGB, depth=(string)8, width=(string)"+str(widthIn)+", height=(string)"+str(heightIn)+",framerate=" +
                       str(framerateIn)+"/1 ! rtpvrawdepay ! queue ! videoconvert ! video/x-raw, format=BGR, width="+str(oflowWidthIn)+", height="+str(oflowHeightIn)+" ! appsink"), cv2.CAP_GSTREAMER)  # UDP CAMERA ON JETSON
-    #cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
     print("cap created")
     fourcc = 0xff
-    # cv2.VideoWriter_fourcc(*'MJPG')
+    
     cap_send = cv2.VideoCapture(
         "videotestsrc ! video/x-raw,framerate=30/1 ! videoscale ! videoconvert ! appsink", cv2.CAP_GSTREAMER)
     print("cap send created")
@@ -109,78 +106,61 @@ if not out_send.isOpened():
     exit(0)
 #--------------------------------------------------------------------------------------
 #poseBuffer = np.zeros((4, 10, 50))
-_handsPoints = [4]
-poseBuffer = [(...,4)]
-inshotCount = 0
-def calcRaiseHands(_poses):
+poseBuffer = []
+def calcRaiseHands(_poses, _rgb, bump):
     lastScore = 0
-    bump = 0
+    skeletonthresh = 0.01
+    confidentPose = []
+    poses = []
     for pose in _poses:
-        if pose.score < 0.1: continue
-        if(pose.score > lastScore):
-            lastScore = pose.score
-            for label, keypoint in pose.keypoints.items():
-                if(label.name == "LEFT_ELBOW"):
-                    _handsPoints = keypoint[0].x
-                elif(label.name == "RIGHT_ELBOW"):
-                    _handsPoints = keypoint[0].y
-                elif(label.name == "LEFT_WRIST"):
-                    _handsPoints = keypoint[0].x
-                elif(label.name == "RIGHT_WRIST"):
-                    _handsPoints = keypoint[0].y
+        pose = pose[0]
+        ls = pose[KeypointType.LEFT_SHOULDER].point
+        rs = pose[KeypointType.RIGHT_SHOULDER].point
+        lw = pose[KeypointType.LEFT_ELBOW].point
+        rw = pose[KeypointType.RIGHT_ELBOW].point
         
-            poseBuffer.append(_handsPoints)
-            if(len(poseBuffer) > 50):
-                poseBuffer.pop()
-    
-    if(not len(_poses)):
-        poseBuffer.clear()
-    
-    for n in poseBuffer:
-        print(n)
+        if((lw.y - 5 < ls.y) and (rw.y - 5 < rs.y)):
+            lw = (int(lw[0]/engine._input_width*_rgb.shape[1]), int(lw[1]/engine._input_height*_rgb.shape[0]))
+            rw = (int(rw[0]/engine._input_width*_rgb.shape[1]), int(rw[1]/engine._input_height*_rgb.shape[0]))
+            lop = np.average(_rgb[-1+int(lw[1]):2+int(lw[1]), -1+int(lw[0]):2+int(lw[0]),2])
+            rop = np.average(_rgb[-1+int(rw[1]):2+int(rw[1]), -1+int(rw[0]):2+int(rw[0]),2])
+            if ((rop > 10) and (lop > 10)):
+                print("Hands Up")
+                SendMessage()
+            else:
+                 print("OPF", lop, rop)
 
-            
-
-
-#        poseBuffer.append(_handsPoints)
-#        if(poseBuffer.len > 50):
-#            poseBuffer.pop()
-#    
-#    posesBuffer.append(poseBuffer)
-#    if(posesBuffer.len > 50):
-#        posesBuffer.pop()
-#    
-            
-            #try:
-            #    if((_lWrist[0].y < _lElbow[0].y) & (_rWrist[0].y < _rElbow[0].y)):
-            #        #print(_lWrist[0].y)
-            #        bump += 1
-            #except: pass
-        
-        
-#    lastScore = pose.score
-#    if(bump > 3):
-#        print("BONGO")
-#        bump = 0
+    if(bump > 5):
+        #SendMessage()
+        # print("HANDS_UP")
+        bump = 0
+    return bump, confidentPose, poses
 #--------------------------------------------------------------------------------------_
-def drawDebug(_frame2, _poses):
+def drawDebug(_frame2, _rgb, _poses):
     for pose in _poses:
         if pose.score < 0.1: continue
-        print('\nPose Score: ', pose.score)
+        #print('\nPose Score: ', pose.score)
         for label, keypoint in pose.keypoints.items():
             cv2.circle(_frame2, (int(keypoint.point[0]/engine._input_width*_frame2.shape[1]), int(keypoint.point[1]/engine._input_height*_frame2.shape[0])), 2, [0, 255, 0])
-            print(label.name, keypoint.point[0], keypoint.point[1], keypoint.score)
+            #print(label.name, keypoint.point[0], keypoint.point[1], keypoint.score)
 
-    cv2.imshow("", _frame2)
+    cv2.imshow("IMSk", _frame2)
+    cv2.imshow("OF", _rgb)
 #--------------------------------------------------------------------------------------_
+
+lastFrame = 0
 def opticalFlow():
     if cap.isOpened():
         ret, frame1 = cap.read()
         prvs = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
         hsv = np.zeros_like(frame1)
         hsv[..., 1] = 255
-        while(cap.isOpened()):
-            ret, frame2 = cap.read()
+        _bump = 0
+        while(True):
+            if(cap.isOpened()):
+                ret, frame2 = cap.read()
+            else:
+                print("DEAD")
             s = time.time()
             poses, inference_time = engine.DetectPosesInImage(frame2)
             next = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
@@ -197,15 +177,19 @@ def opticalFlow():
                                                 cv2.OPTFLOW_FARNEBACK_GAUSSIAN)  # flags, 0 , cv2.OPTFLOW_FARNEBACK_GAUSSIAN
 
             mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+            #print(hsv)
             hsv[..., 0] = ang*180/np.pi/2
+            #print(hsv)
             hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
 
             rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
             out_send.write(rgb)
 
-            drawDebug(frame2, poses)
-            calcRaiseHands(poses)
-            
+            _bump, armLocations, _poses = calcRaiseHands(poses, hsv, _bump)
+            drawDebug(frame2, hsv, poses)
+
+
+
             k = cv2.waitKey(10) & 0xff
             if k == 27:  # EXIT
                 break
@@ -220,6 +204,23 @@ def opticalFlow():
         cv2.destroyAllWindows()
         exit(0)
 
+
+
+def SendMessage():
+    interfaces = socket.getaddrinfo(
+        host=socket.gethostname(), port=None, family=socket.AF_INET)
+    allips = [ip[-1][0] for ip in interfaces]
+
+    msg = b'DHS---EVERYONEFLY'
+
+    for ip in allips:
+        print(f'sending on {ip}')
+        sock = socket.socket(
+            socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)  # UDP
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.bind((ip, 0))
+        sock.sendto(msg, ("255.255.255.255", 5007))
+        sock.close()
 
 if __name__ == '__main__':
     try:
