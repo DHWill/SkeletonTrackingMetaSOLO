@@ -21,6 +21,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+from os import devnull
 import sys
 import cv2
 import numpy as np
@@ -28,7 +29,8 @@ from pose_engine import Keypoint, KeypointType, PoseEngine
 import time
 import threading
 import socket
-
+#import os
+import subprocess
 
 class ThreadedCap:
     def __init__(self, param1, param2):
@@ -56,6 +58,19 @@ class ThreadedCap:
         return self.cap.isOpened()
 
 #--------------------------------------------------------------------------------------_
+def call_gstreamer():
+    subprocess.run(["sudo", "/content/nvargus.sh"])
+    ip = subprocess.check_output("ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.)\{3\}[0-9]*' | grep -Eo '([0-9]*\.)\{3\}[0-9]*' | grep -v hostname -i | head -n1", shell=True)
+    subprocess.run(["/content/gst.sh",  ip, "5014",  "0"], shell=False)
+
+
+def gstreamer_thread():
+    subprocess.run(["killall", "gst-launch-1.0"])
+    gst_thread = threading.Thread(target=call_gstreamer)
+    gst_thread.daemon = True
+    return gst_thread
+    
+
 engine = PoseEngine(
     '/dependencies/models/mobilenet/posenet_mobilenet_v1_075_353_481_quant_decoder_edgetpu.tflite')
 try:
@@ -76,6 +91,11 @@ try:
     else:
         print("not enough arguments")
     print("TryingCap")
+    
+    #subprocess.check_call(["sudo",  "/content/gst.sh",  "172.17.0.1", "5014",  "0"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    gst_thread = gstreamer_thread()
+    gst_thread.start()
+    time.sleep(2)
     cap = ThreadedCap(("udpsrc port="+str(portIn)+" ! application/x-rtp, encoding-name=(string)RAW, sampling=(string)RGB, depth=(string)8, width=(string)"+str(widthIn)+", height=(string)"+str(heightIn)+",framerate=" +
                       str(framerateIn)+"/1 ! rtpvrawdepay ! queue ! videoconvert ! video/x-raw, format=BGR, width="+str(oflowWidthIn)+", height="+str(oflowHeightIn)+" ! appsink"), cv2.CAP_GSTREAMER)  # UDP CAMERA ON JETSON
     print("cap created")
@@ -156,11 +176,24 @@ def opticalFlow():
         hsv = np.zeros_like(frame1)
         hsv[..., 1] = 255
         _bump = 0
+        First = True
         while(True):
             if(cap.isOpened()):
                 ret, frame2 = cap.read()
             else:
                 print("DEAD")
+
+            cont = np.array_equal(frame2, frame1)
+            if np.array_equal(frame2, frame1) and not First:
+                gst_thread = gstreamer_thread()
+                time.sleep(1)
+                gst_thread.start()
+                time.sleep(10)
+                continue
+
+            First = False
+            frame1 = frame2
+
             s = time.time()
             poses, inference_time = engine.DetectPosesInImage(frame2)
             next = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
@@ -211,7 +244,7 @@ def SendMessage():
         host=socket.gethostname(), port=None, family=socket.AF_INET)
     allips = [ip[-1][0] for ip in interfaces]
 
-    msg = b'DHS---EVERYONEFLY'
+    msg = b'DHS---EVERYONEFLY---'
 
     for ip in allips:
         print(f'sending on {ip}')
