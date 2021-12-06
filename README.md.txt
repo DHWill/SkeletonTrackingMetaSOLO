@@ -1,3 +1,4 @@
+Clone the repo to dependencies. 
 Overwrite the files in "toAddToContent" in /content/
 
 https://coral.ai/docs/accelerator/get-started/#1-install-the-edge-tpu-runtime
@@ -11,3 +12,4 @@ install EdgeTPU for Python 3.6 Linux
 https://dl.google.com/coral/edgetpu_api/edgetpu-2.14.1-py3-none-any.whl
 
 Make sure the /etc/udev/rules.d is installed for the edgeTPU for permissions (0666)
+
