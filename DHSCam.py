@@ -25,6 +25,7 @@ from os import devnull
 import sys
 import cv2
 import numpy as np
+from numpy.lib.polynomial import RankWarning
 from pose_engine import Keypoint, KeypointType, PoseEngine
 import time
 import threading
@@ -58,9 +59,12 @@ class ThreadedCap:
         return self.cap.isOpened()
 
 #--------------------------------------------------------------------------------------_
+myIp = subprocess.check_output("ifconfig | grep eth0 -A1 |grep -Eo 'inet (addr:)?([0-9]*\.)\{3\}[0-9]*' | grep -Eo '([0-9]*\.)\{3\}[0-9]*' | grep -v hostname -i | head -n1", shell=True)
+
 def call_gstreamer():
     subprocess.run(["sudo", "/content/nvargus.sh"])
-    ip = subprocess.check_output("ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.)\{3\}[0-9]*' | grep -Eo '([0-9]*\.)\{3\}[0-9]*' | grep -v hostname -i | head -n1", shell=True)
+    time.sleep(0.5)
+    ip = subprocess.check_output("ifconfig | grep eth0 -A1 |grep -Eo 'inet (addr:)?([0-9]*\.)\{3\}[0-9]*' | grep -Eo '([0-9]*\.)\{3\}[0-9]*' | grep -v hostname -i | head -n1", shell=True)
     subprocess.run(["/content/gst.sh",  ip, "5014",  "0"], shell=False)
 
 
@@ -134,25 +138,42 @@ def calcRaiseHands(_poses, _rgb, bump):
     poses = []
     for pose in _poses:
         pose = pose[0]
-        ls = pose[KeypointType.LEFT_SHOULDER].point
-        rs = pose[KeypointType.RIGHT_SHOULDER].point
-        lw = pose[KeypointType.LEFT_ELBOW].point
-        rw = pose[KeypointType.RIGHT_ELBOW].point
+        ls = pose[KeypointType.LEFT_SHOULDER]
+        rs = pose[KeypointType.RIGHT_SHOULDER]
+        lw = pose[KeypointType.LEFT_ELBOW]
+        rw = pose[KeypointType.RIGHT_ELBOW]
         
+        lk = pose[KeypointType.LEFT_KNEE].point
+        rk = pose[KeypointType.RIGHT_KNEE].point
+
+        if (rk.y < 300 or lk.y < 300):
+            continue
+
+        if not (ls.score > 0.1 or rs.score > 0.1 or rw.score > 0.1 or lw.score >0.1):
+            continue
+
+        ls = ls.point
+        rs = rs.point
+        lw = lw.point
+        rw = rw.point
+          
+        print(rk.y)
         if((lw.y - 5 < ls.y) and (rw.y - 5 < rs.y)):
             lw = (int(lw[0]/engine._input_width*_rgb.shape[1]), int(lw[1]/engine._input_height*_rgb.shape[0]))
             rw = (int(rw[0]/engine._input_width*_rgb.shape[1]), int(rw[1]/engine._input_height*_rgb.shape[0]))
             lop = np.average(_rgb[-1+int(lw[1]):2+int(lw[1]), -1+int(lw[0]):2+int(lw[0]),2])
             rop = np.average(_rgb[-1+int(rw[1]):2+int(rw[1]), -1+int(rw[0]):2+int(rw[0]),2])
             if ((rop > 10) and (lop > 10)):
-                print("Hands Up")
-                SendMessage()
+                #print("Hands Up")
+                bump+=2
+                #SendMessage()
             else:
                  print("OPF", lop, rop)
+                 bump= max(bump-1, 0)
 
     if(bump > 5):
-        #SendMessage()
-        # print("HANDS_UP")
+        SendMessage()
+        print("HANDS_UP")
         bump = 0
     return bump, confidentPose, poses
 #--------------------------------------------------------------------------------------_
@@ -248,6 +269,9 @@ def SendMessage():
 
     for ip in allips:
         print(f'sending on {ip}')
+        #######temp#####
+        # ip = '192.168.0.105'
+        ip = myIp
         sock = socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)  # UDP
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
